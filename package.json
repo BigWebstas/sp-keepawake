@@ -1,0 +1,9 @@
+{
+  "name": "sp-keepawake",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Super Productivity plugin: keep the screen awake on desktop, Android, and iOS.",
+  "scripts": {
+    "build": "node scripts/build-zip.js"
+  }
+}
