@@ -6,17 +6,6 @@ const BUTTON_LABEL = 'Keep Awake';
 // current state.
 const SHOW_FOR = ['PROJECT', 'TAG', 'TODAY'];
 
-// Chromium's Linux Wake Lock backend is unreliable under Wayland/Ozone (common on
-// KDE Plasma, where it's the default session type) — navigator.wakeLock can resolve
-// without actually inhibiting idle/sleep. `systemd-inhibit` talks to logind directly
-// and works regardless of display server, so it's used as a desktop fallback.
-//
-// Each native inhibitor is short-lived (self-expires) instead of long-running, so a
-// crashed/force-quit app can never leave the screen wedged awake: we just re-spawn a
-// fresh one on an interval shorter than its own lifetime, while the toggle is on.
-const NATIVE_RENEW_INTERVAL_MS = 120000; // 2 min
-const NATIVE_INHIBIT_DURATION_SEC = 150; // 2.5 min — outlives one renewal interval
-
 const REPO = 'BigWebstas/sp-keepawake';
 const RELEASES_PAGE_URL = `https://github.com/${REPO}/releases/latest`;
 // Stamped from manifest.json's "version" by scripts/build-zip.js — keep the
@@ -27,13 +16,9 @@ const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 1 day — don't hammer 
 
 let wakeLock = null;
 let enabled = localStorage.getItem(STORAGE_KEY) === 'true';
-let nativeRenewTimer = null;
-let nativeFallbackDead = false; // stop retrying after the first hard failure/denial
 let latestKnownVersion = null;
 
 const isSupported = () => 'wakeLock' in navigator;
-const hasNativeFallback = () =>
-  typeof plugin !== 'undefined' && typeof plugin.executeNodeScript === 'function';
 
 async function acquireWakeLock() {
   if (!isSupported() || wakeLock || document.visibilityState !== 'visible') {
@@ -54,67 +39,6 @@ function releaseWakeLock() {
     wakeLock.release();
     wakeLock = null;
   }
-}
-
-async function renewNativeInhibitor() {
-  if (nativeFallbackDead || !hasNativeFallback()) {
-    return;
-  }
-  try {
-    await plugin.executeNodeScript({
-      timeout: 10000,
-      script: `
-        const { spawn } = require('child_process');
-        try {
-          const child = spawn(
-            'systemd-inhibit',
-            [
-              '--what=idle:sleep',
-              '--who=Super Productivity (sp-keepawake)',
-              '--why=Keep Awake plugin enabled',
-              '--mode=block',
-              'sleep', '${NATIVE_INHIBIT_DURATION_SEC}',
-            ],
-            { detached: true, stdio: 'ignore' },
-          );
-          child.on('error', () => {});
-          child.unref();
-        } catch (e) {
-          // no systemd-inhibit on this system — fine, wakeLock is the baseline
-        }
-        return true;
-      `,
-    });
-  } catch (err) {
-    // Consent denied, no nodeExecution support, or script failed — stop retrying
-    // so we don't re-trigger the consent prompt every renewal interval.
-    nativeFallbackDead = true;
-  }
-}
-
-function startNativeFallback() {
-  if (nativeRenewTimer || nativeFallbackDead || !hasNativeFallback()) {
-    return;
-  }
-  renewNativeInhibitor();
-  nativeRenewTimer = setInterval(renewNativeInhibitor, NATIVE_RENEW_INTERVAL_MS);
-}
-
-function stopNativeFallback() {
-  if (nativeRenewTimer) {
-    clearInterval(nativeRenewTimer);
-    nativeRenewTimer = null;
-  }
-}
-
-async function acquire() {
-  await acquireWakeLock();
-  startNativeFallback();
-}
-
-function release() {
-  releaseWakeLock();
-  stopNativeFallback();
 }
 
 function escapeHtml(str) {
@@ -187,7 +111,7 @@ async function toggle() {
   localStorage.setItem(STORAGE_KEY, String(enabled));
 
   if (enabled) {
-    if (!isSupported() && !hasNativeFallback()) {
+    if (!isSupported()) {
       enabled = false;
       localStorage.setItem(STORAGE_KEY, 'false');
       renderButton();
@@ -197,14 +121,14 @@ async function toggle() {
       });
       return;
     }
-    await acquire();
+    await acquireWakeLock();
     renderButton();
     PluginAPI.showSnack({
-      msg: wakeLock || hasNativeFallback() ? 'Keep Awake: ON' : 'Could not keep the screen awake.',
-      type: wakeLock || hasNativeFallback() ? 'SUCCESS' : 'ERROR',
+      msg: wakeLock ? 'Keep Awake: ON' : 'Could not keep the screen awake.',
+      type: wakeLock ? 'SUCCESS' : 'ERROR',
     });
   } else {
-    release();
+    releaseWakeLock();
     renderButton();
     PluginAPI.showSnack({ msg: 'Keep Awake: OFF', type: 'INFO' });
   }
@@ -219,8 +143,7 @@ async function toggle() {
 
 // The OS/browser releases the Wake Lock sentinel whenever the document is hidden
 // (tab switch, app backgrounded, screen lock). Re-request it once the app is
-// visible again if the user still wants it on. The native fallback isn't tied to
-// visibility — it keeps renewing regardless.
+// visible again if the user still wants it on.
 function onVisibilityChange() {
   if (enabled && document.visibilityState === 'visible') {
     acquireWakeLock();
@@ -230,14 +153,13 @@ function onVisibilityChange() {
 document.addEventListener('visibilitychange', onVisibilityChange);
 
 if (enabled) {
-  acquire();
+  acquireWakeLock();
 }
 renderButton();
 
 if (typeof plugin !== 'undefined' && plugin.onUnload) {
   plugin.onUnload(() => {
     document.removeEventListener('visibilitychange', onVisibilityChange);
-    stopNativeFallback();
     releaseWakeLock();
   });
 }
