@@ -37,14 +37,13 @@ function dosDateTime(date) {
   return { time, dosDate };
 }
 
-function buildZip(files) {
+function buildZip(entries) {
   const { time, dosDate } = dosDateTime(new Date());
   const localParts = [];
   const centralParts = [];
   let offset = 0;
 
-  for (const name of files) {
-    const data = fs.readFileSync(path.join(ROOT, name));
+  for (const { name, data } of entries) {
     const crc = crc32(data);
     const nameBuf = Buffer.from(name, 'utf8');
 
@@ -94,8 +93,8 @@ function buildZip(files) {
   eocd.writeUInt32LE(0x06054b50, 0);
   eocd.writeUInt16LE(0, 4); // disk number
   eocd.writeUInt16LE(0, 6); // disk with central dir
-  eocd.writeUInt16LE(files.length, 8);
-  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
   eocd.writeUInt32LE(centralDir.length, 12);
   eocd.writeUInt32LE(centralDirStart, 16);
   eocd.writeUInt16LE(0, 20); // comment length
@@ -110,6 +109,23 @@ for (const name of FILES) {
   }
 }
 
+const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+
+// plugin.js can't read its own manifest at runtime, so the build stamps the
+// version in here — the single source of truth stays manifest.json.
+const VERSION_TOKEN = "'__PLUGIN_VERSION__'";
+let pluginJs = fs.readFileSync(path.join(ROOT, 'plugin.js'), 'utf8');
+if (!pluginJs.includes(VERSION_TOKEN)) {
+  console.error(`plugin.js is missing the ${VERSION_TOKEN} placeholder`);
+  process.exit(1);
+}
+pluginJs = pluginJs.replace(VERSION_TOKEN, JSON.stringify(manifest.version));
+
+const entries = FILES.map((name) => ({
+  name,
+  data: name === 'plugin.js' ? Buffer.from(pluginJs, 'utf8') : fs.readFileSync(path.join(ROOT, name)),
+}));
+
 fs.mkdirSync(DIST, { recursive: true });
-fs.writeFileSync(OUT, buildZip(FILES));
-console.log(`Wrote ${path.relative(ROOT, OUT)}`);
+fs.writeFileSync(OUT, buildZip(entries));
+console.log(`Wrote ${path.relative(ROOT, OUT)} (v${manifest.version})`);

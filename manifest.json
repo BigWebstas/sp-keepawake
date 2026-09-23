@@ -1,11 +1,12 @@
 {
   "id": "sp-keepawake",
   "name": "Keep Awake",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Keeps the screen on while Super Productivity is open, on desktop, Android, and iOS.",
   "manifestVersion": 1,
   "minSupVersion": "14.0.0",
   "icon": "icon.svg",
   "hooks": [],
-  "permissions": ["nodeExecution"]
+  "permissions": ["nodeExecution", "http"],
+  "allowedHosts": ["api.github.com"]
 }

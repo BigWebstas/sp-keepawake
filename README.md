@@ -42,6 +42,11 @@ slashed when it's off. Click it to toggle. The choice is remembered per
 device (`localStorage`) and re-applied on next launch and whenever the app
 returns to the foreground.
 
+Every time you click the button, the plugin checks GitHub for a newer release
+(at most once per day, via the `http` permission) and, if one exists, shows a
+popup with a link to it. This is a passive check against the public GitHub
+API only — no telemetry is sent.
+
 ## Known limitations
 
 - iOS/iPadOS versions before 16.4 don't implement the Wake Lock API in
